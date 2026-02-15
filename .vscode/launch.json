@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Houra}",
+            "name": "Debug Houra",
+            "target": "Houra",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Houra"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Houra}",
+            "name": "Release Houra",
+            "target": "Houra",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Houra"
+        }
+    ]
+}
