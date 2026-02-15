@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { clerkAuthService } from "@/lib/clerk/auth-service";
 import { fileStorageService } from "@/lib/storage/file-storage-service";
+import { requireStudentAuth } from "@/lib/server/auth-guard";
 import { jsonError } from "@/lib/server/http";
 
 const schema = z.object({
@@ -11,9 +11,8 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  const session = await clerkAuthService.getCurrentUser();
-  if (!session) return jsonError("Unauthorized", 401);
-  if (!session.isApproved || session.role !== "student") return jsonError("Forbidden", 403);
+  const guard = await requireStudentAuth();
+  if (!guard.ok) return guard.response;
 
   const payload = await request.json().catch(() => null);
   const parsed = schema.safeParse(payload);

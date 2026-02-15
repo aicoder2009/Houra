@@ -6,7 +6,6 @@ import { UserButton } from "@clerk/nextjs";
 import {
   Activity,
   Building2,
-  CalendarDays,
   Clock3,
   LayoutDashboard,
   Settings,
@@ -20,7 +19,6 @@ const navItems = [
   { href: "/organizations", label: "Organizations", icon: Building2 },
   { href: "/logs", label: "Logs", icon: Clock3 },
   { href: "/reports", label: "Reports", icon: Activity },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/sync", label: "Sync", icon: RefreshCw },
   { href: "/audit", label: "Audit", icon: ShieldCheck },
   { href: "/settings", label: "Settings", icon: Settings },

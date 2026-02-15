@@ -13,6 +13,8 @@ const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
+const assistantId = process.env.OPENAI_ASSISTANT_ID?.trim() || null;
+
 export async function createAgentRun(input: {
   studentId: string;
   objective: string;
@@ -43,34 +45,38 @@ export async function generateAgentActions(input: {
   }
 
   try {
-    const completion = await openai.responses.create({
-      model: input.run.model,
-      input: [
-        {
-          role: "system",
-          content:
-            "You are an autonomous operations agent for a student service-hours app. Return JSON array only with actionable mutations.",
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            objective: input.run.objective,
-            contextScope: input.run.contextScope,
-            entries: input.state.entries.slice(0, 25),
-            syncQueue: input.state.syncQueue.slice(0, 25),
-            shareLinks: input.state.shareLinks.slice(0, 10),
-          }),
-        },
-      ],
-      max_output_tokens: 1200,
-    });
+    const raw = assistantId
+      ? await generateWithAssistant({
+          assistantId,
+          model: input.run.model,
+          objective: input.run.objective,
+          contextScope: input.run.contextScope,
+          state: input.state,
+        })
+      : await generateWithResponses({
+          model: input.run.model,
+          objective: input.run.objective,
+          contextScope: input.run.contextScope,
+          state: input.state,
+        });
 
-    const raw = completion.output_text?.trim() ?? "";
     if (!raw) {
       return draft;
     }
 
-    const parsed = JSON.parse(raw) as Array<{
+    const parsedJson = JSON.parse(raw) as
+      | Array<unknown>
+      | {
+          actions?: Array<unknown>;
+        };
+
+    const items = Array.isArray(parsedJson)
+      ? parsedJson
+      : Array.isArray(parsedJson.actions)
+        ? parsedJson.actions
+        : [];
+
+    const parsed = items as Array<{
       title: string;
       detail: string;
       actionKind: AgentActionKind;
@@ -99,6 +105,89 @@ export async function generateAgentActions(input: {
   } catch {
     return draft;
   }
+}
+
+async function generateWithResponses(input: {
+  model: string;
+  objective: string;
+  contextScope: string;
+  state: HouraState;
+}): Promise<string> {
+  if (!openai) return "";
+
+  const completion = await openai.responses.create({
+    model: input.model,
+    input: [
+      {
+        role: "system",
+        content:
+          "You are an autonomous operations agent for a student service-hours app. Return ONLY valid JSON. Prefer an object like {\"actions\":[...]} for compatibility.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          objective: input.objective,
+          contextScope: input.contextScope,
+          entries: input.state.entries.slice(0, 25),
+          syncQueue: input.state.syncQueue.slice(0, 25),
+          shareLinks: input.state.shareLinks.slice(0, 10),
+        }),
+      },
+    ],
+    max_output_tokens: 1200,
+  });
+
+  return completion.output_text?.trim() ?? "";
+}
+
+async function generateWithAssistant(input: {
+  assistantId: string;
+  model: string;
+  objective: string;
+  contextScope: string;
+  state: HouraState;
+}): Promise<string> {
+  if (!openai) return "";
+
+  const thread = await openai.beta.threads.create();
+
+  const userPayload = {
+    objective: input.objective,
+    contextScope: input.contextScope,
+    entries: input.state.entries.slice(0, 25),
+    syncQueue: input.state.syncQueue.slice(0, 25),
+    shareLinks: input.state.shareLinks.slice(0, 10),
+  };
+
+  await openai.beta.threads.messages.create(thread.id, {
+    role: "user",
+    content: JSON.stringify(userPayload),
+  });
+
+  const run = await openai.beta.threads.runs.createAndPoll(thread.id, {
+    assistant_id: input.assistantId,
+    model: input.model,
+    instructions:
+      "You are an autonomous agent for a student service-hours app. Return ONLY valid JSON. " +
+      "Return a JSON object with shape: {\"actions\":[{title,detail,actionKind,targetEntity,targetId,diffJson}]}. " +
+      "Do not wrap in markdown. If there are no actions, return {\"actions\":[]}. " +
+      "Allowed actionKind values: status_normalization, dedup_metadata, sync_retry, archive_record, share_link_change, export_generation, bulk_status_transition.",
+    response_format: { type: "json_object" },
+  });
+
+  if (run.status !== "completed") {
+    return "";
+  }
+
+  const messages = await openai.beta.threads.messages.list(thread.id, { limit: 10 });
+  const latestAssistant = messages.data.find((message) => message.role === "assistant");
+  if (!latestAssistant) return "";
+
+  const textParts = latestAssistant.content
+    .map((part) => (part.type === "text" ? part.text.value : ""))
+    .filter(Boolean);
+
+  return textParts.join("\n").trim();
 }
 
 function buildFallbackActions(run: AgentRun, state: HouraState): AgentAction[] {

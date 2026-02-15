@@ -4,37 +4,44 @@ import { nowIso } from "@/lib/schemas/seed";
 import type { AuditEvent, StateSnapshot } from "@/lib/schemas/types";
 import type { AgentService } from "@/lib/services/interfaces";
 import {
-  clearDangerousApproval,
-  isDangerousApproved,
-  listAgentActions,
-  markDangerousApproval,
-  mutateState,
-  pushAudit,
-  pushSnapshot,
-  readState,
-  updateAgentActions,
-  writeAgentRun,
-} from "@/lib/server/runtime-db";
+  applyAgentActionEffects,
+  getStateForStudent,
+  listAgentActionsByRun,
+  markAgentActionsApplied,
+  recordAuditEvent,
+  updateAgentRunStatus,
+  writeAgentRunAndActions,
+  writeSnapshot,
+} from "@/lib/server/houra-repo";
 
 export const agentService: AgentService = {
   async run(input) {
-    const state = readState();
     const run = await createAgentRun(input);
+    const state = await getStateForStudent(input.studentId);
     const actions = await generateAgentActions({ run, state });
+    const pendingRun = {
+      ...run,
+      status: "Awaiting Approval" as const,
+    };
 
-    writeAgentRun({ ...run, status: "Awaiting Approval" }, actions);
+    await writeAgentRunAndActions({
+      run: pendingRun,
+      actions,
+    });
 
-    pushAudit(agentAudit({
+    await recordAuditEvent(
+      agentAudit({
       actorType: "ai_agent",
       entityType: "agentRun",
       entityId: run.id,
       actionType: "create",
       afterJson: JSON.stringify(run),
       correlationId: run.id,
-    }));
+      }),
+    );
 
-    actions.forEach((action) => {
-      pushAudit(
+    for (const action of actions) {
+      await recordAuditEvent(
         agentAudit({
           actorType: "ai_agent",
           entityType: "agentAction",
@@ -45,17 +52,13 @@ export const agentService: AgentService = {
           correlationId: run.id,
         }),
       );
+    }
 
-      if (!dangerousActionKinds.includes(action.actionKind)) {
-        markDangerousApproval(action.id);
-      }
-    });
-
-    return { run: { ...run, status: "Awaiting Approval" }, actions };
+    return { run: pendingRun, actions };
   },
 
   async apply(input) {
-    const actions = listAgentActions(input.runId).filter((action) =>
+    const actions = (await listAgentActionsByRun(input.runId)).filter((action) =>
       input.actionIds.includes(action.id),
     );
 
@@ -64,56 +67,41 @@ export const agentService: AgentService = {
       throw new Error("Dangerous actions require approval");
     }
 
-    dangerous.forEach((action) => markDangerousApproval(action.id));
+    const allowed = actions.filter(
+      (action) => !dangerousActionKinds.includes(action.actionKind) || input.approveDangerous,
+    );
+    const appliedAt = nowIso();
 
-    const allowed = actions.filter((action) => isDangerousApproved(action.id));
-
-    mutateState((db) => {
-      allowed.forEach((action) => {
-        if (action.targetEntity === "serviceEntry" && action.actionKind === "status_normalization") {
-          db.entries = db.entries.map((entry) =>
-            entry.id === action.targetId
-              ? { ...entry, status: "Verified", updatedAt: nowIso() }
-              : entry,
-          );
-        }
-
-        if (action.targetEntity === "shareLink" && action.actionKind === "share_link_change") {
-          db.shareLinks = db.shareLinks.map((link) =>
-            link.id === action.targetId ? { ...link, revokedAt: nowIso() } : link,
-          );
-        }
-
-        if (action.targetEntity === "syncQueueItem" && action.actionKind === "sync_retry") {
-          db.syncQueue = db.syncQueue.map((item) =>
-            item.id === action.targetId ? { ...item, status: "Uploading" } : item,
-          );
-        }
+    for (const action of allowed) {
+      await applyAgentActionEffects({
+        action,
+        now: appliedAt,
+        studentId: input.studentId,
       });
-    });
+    }
 
     const snapshot: StateSnapshot = {
       id: crypto.randomUUID(),
-      studentId: input.actorId,
+      studentId: input.studentId,
       batchId: input.runId,
-      snapshotJson: JSON.stringify({ actionIds: allowed.map((action) => action.id), at: nowIso() }),
-      createdAt: nowIso(),
+      snapshotJson: JSON.stringify({ actionIds: allowed.map((action) => action.id), at: appliedAt }),
+      createdAt: appliedAt,
     };
 
-    pushSnapshot(snapshot);
+    await writeSnapshot(snapshot);
 
-    updateAgentActions(
-      allowed.map((action) => action.id),
-      {
-        approved: true,
-        appliedAt: nowIso(),
-        actionType: "apply",
-      },
-    );
+    await markAgentActionsApplied({
+      actionIds: allowed.map((action) => action.id),
+      appliedAt,
+    });
 
-    allowed.forEach((action) => {
-      clearDangerousApproval(action.id);
-      pushAudit(
+    await updateAgentRunStatus({
+      runId: input.runId,
+      status: "Applied",
+    });
+
+    for (const action of allowed) {
+      await recordAuditEvent(
         agentAudit({
           actorType: "student",
           actorId: input.actorId,
@@ -126,13 +114,13 @@ export const agentService: AgentService = {
           snapshotId: snapshot.id,
         }),
       );
-    });
+    }
 
     return { snapshotId: snapshot.id, applied: allowed };
   },
 
   async undo(input) {
-    pushAudit(
+    await recordAuditEvent(
       agentAudit({
         actorType: "student",
         actorId: input.actorId,

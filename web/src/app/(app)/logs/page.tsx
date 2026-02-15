@@ -39,6 +39,7 @@ export default function LogsPage() {
     () => entries.find((entry) => entry.id === selectedEntryId) ?? entries[0],
     [entries, selectedEntryId],
   );
+  const activeOrganizationId = organizationId || organizations[0]?.id || "";
 
   async function onImportFile(file: File | null) {
     if (!file) return;
@@ -138,7 +139,7 @@ export default function LogsPage() {
                 <Input type="number" min="0.25" step="0.25" value={hours} onChange={(event) => setHours(event.target.value)} />
               </div>
               <select
-                value={organizationId}
+                value={activeOrganizationId}
                 onChange={(event) => setOrganizationId(event.target.value)}
                 className="h-7 w-full rounded-md border border-border bg-input/20 px-2 text-xs"
               >
@@ -152,10 +153,10 @@ export default function LogsPage() {
               <Button
                 className="w-full"
                 onClick={() => {
-                  if (!activityName || !organizationId || !hours) return;
+                  if (!activityName || !activeOrganizationId || !hours) return;
                   addServiceEntry({
                     activityName,
-                    organizationId,
+                    organizationId: activeOrganizationId,
                     hours: Number(hours),
                     notes,
                     date: new Date(date).toISOString(),

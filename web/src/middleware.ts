@@ -7,6 +7,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/waitlist(.*)",
   "/",
+  "/api/webhooks/clerk",
   "/api/agent/runs/scheduled",
 ]);
 
@@ -18,12 +19,12 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   const session = await auth();
-
   if (!session.userId) {
     return session.redirectToSignIn({ returnBackUrl: req.url });
   }
 
-  const metadata = (session.sessionClaims?.publicMetadata ?? {}) as Record<string, unknown>;
+  const claims = (session.sessionClaims ?? {}) as Record<string, unknown>;
+  const metadata = (claims.publicMetadata ?? {}) as Record<string, unknown>;
   const { isApproved, role } = resolveStudentClaims(metadata);
 
   if (role !== "student") {

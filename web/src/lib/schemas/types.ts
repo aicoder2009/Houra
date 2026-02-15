@@ -277,3 +277,33 @@ export type HouraState = {
   snapshots: StateSnapshot[];
   auditEvents: AuditEvent[];
 };
+
+export type AuthContext = {
+  clerkUserId: string;
+  sessionId: string | null;
+  role: "student" | "unknown";
+  isApproved: boolean;
+  email: string | null;
+  name: string | null;
+};
+
+export type BootstrapPayload = {
+  auth: AuthContext;
+  state: HouraState;
+};
+
+export type MutationEnvelope = {
+  id: UUID;
+  entityType: EntityType;
+  entityId: UUID;
+  operation: ActionType;
+  payload: string;
+  createdAt: string;
+  retryCount: number;
+  status: SyncState;
+};
+
+export type ConflictResolutionPayload = {
+  conflictId: UUID;
+  resolutionJson: string;
+};

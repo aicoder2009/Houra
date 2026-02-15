@@ -1,18 +1,23 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { clerkAuthService } from "@/lib/clerk/auth-service";
-import { resolveConflict } from "@/lib/server/runtime-db";
+import { requireStudentAuth } from "@/lib/server/auth-guard";
 import { jsonError } from "@/lib/server/http";
 import { buildAuditEvent } from "@/lib/server/audit";
-import { pushAudit } from "@/lib/server/runtime-db";
+import {
+  recordAuditEvent,
+  resolveSyncConflict,
+  upsertStudentFromAuth,
+} from "@/lib/server/houra-repo";
 
 const schema = z.object({
   conflictId: z.string().min(1),
   resolutionJson: z.string().min(2),
-  simulatedQueueProcess: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
+  const guard = await requireStudentAuth();
+  if (!guard.ok) return guard.response;
+
   const payload = await request.json().catch(() => null);
   const parsed = schema.safeParse(payload);
 
@@ -20,19 +25,20 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid payload", 400);
   }
 
-  const session = await clerkAuthService.getCurrentUser();
-  if (!session && !parsed.data.simulatedQueueProcess) {
-    return jsonError("Unauthorized", 401);
-  }
+  const student = await upsertStudentFromAuth(guard.auth);
 
   try {
-    const conflict = resolveConflict(parsed.data.conflictId, parsed.data.resolutionJson);
+    const conflict = await resolveSyncConflict({
+      studentId: student.id,
+      conflictId: parsed.data.conflictId,
+      resolutionJson: parsed.data.resolutionJson,
+    });
 
-    pushAudit(
+    await recordAuditEvent(
       buildAuditEvent({
-        actorType: session ? "student" : "system",
-        actorId: session?.clerkUserId,
-        source: session ? "ui" : "system",
+        actorType: "student",
+        actorId: guard.auth.clerkUserId,
+        source: "ui",
         entityType: "syncConflict",
         entityId: conflict.id,
         actionType: "resolveConflict",
@@ -43,9 +49,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(conflict);
   } catch {
-    if (parsed.data.simulatedQueueProcess) {
-      return NextResponse.json({ ok: true });
-    }
     return jsonError("Conflict not found", 404);
   }
 }

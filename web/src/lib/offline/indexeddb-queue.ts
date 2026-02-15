@@ -19,33 +19,11 @@ async function db() {
 
 export const indexedDbSyncService: OfflineSyncService = {
   async enqueue(item) {
-    const database = await db();
-    await database.put(STORE, item);
+    await upsertIndexedQueueItem(item);
   },
 
   async flush() {
-    const database = await db();
-    const allItems = (await database.getAll(STORE)) as SyncQueueItem[];
-
-    if (allItems.length === 0) {
-      return { processed: 0 };
-    }
-
-    for (const item of allItems) {
-      await fetch("/api/sync/resolve-conflict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conflictId: item.id,
-          resolutionJson: item.payload,
-          simulatedQueueProcess: true,
-        }),
-      }).catch(() => {
-        // keep queued if offline/failing
-      });
-      await database.delete(STORE, item.id);
-    }
-
+    const allItems = await readIndexedQueue();
     return { processed: allItems.length };
   },
 
@@ -63,3 +41,18 @@ export const indexedDbSyncService: OfflineSyncService = {
     return response.json();
   },
 };
+
+export async function readIndexedQueue(): Promise<SyncQueueItem[]> {
+  const database = await db();
+  return (await database.getAll(STORE)) as SyncQueueItem[];
+}
+
+export async function upsertIndexedQueueItem(item: SyncQueueItem): Promise<void> {
+  const database = await db();
+  await database.put(STORE, item);
+}
+
+export async function deleteIndexedQueueItem(id: string): Promise<void> {
+  const database = await db();
+  await database.delete(STORE, id);
+}

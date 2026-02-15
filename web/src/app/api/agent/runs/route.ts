@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { agentService } from "@/lib/agent/agent-service";
-import { clerkAuthService } from "@/lib/clerk/auth-service";
-import { readState } from "@/lib/server/runtime-db";
+import { requireStudentAuth } from "@/lib/server/auth-guard";
+import { upsertStudentFromAuth } from "@/lib/server/houra-repo";
 import { jsonError } from "@/lib/server/http";
 
 const schema = z.object({
@@ -13,9 +13,8 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  const session = await clerkAuthService.getCurrentUser();
-  if (!session) return jsonError("Unauthorized", 401);
-  if (!session.isApproved || session.role !== "student") return jsonError("Forbidden", 403);
+  const guard = await requireStudentAuth();
+  if (!guard.ok) return guard.response;
 
   const payload = await request.json().catch(() => null);
   const parsed = schema.safeParse(payload);
@@ -24,13 +23,10 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid payload", 400);
   }
 
-  const state = readState();
-  if (!state.student) {
-    return jsonError("Student profile unavailable", 409);
-  }
+  const student = await upsertStudentFromAuth(guard.auth);
 
   const result = await agentService.run({
-    studentId: state.student.id,
+    studentId: student.id,
     objective: parsed.data.objective,
     contextScope: parsed.data.contextScope,
     model: parsed.data.model,

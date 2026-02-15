@@ -8,6 +8,10 @@ export function OfflineSyncListener() {
   const addAgentUiEvent = useAppStore((state) => state.addAgentUiEvent);
 
   useEffect(() => {
+    if (navigator.onLine) {
+      processSyncQueue().catch(() => undefined);
+    }
+
     function onOnline() {
       addAgentUiEvent({ type: "info", text: "Connection restored. Sync worker running." });
       processSyncQueue().catch(() => {

@@ -9,6 +9,9 @@ import type {
 export interface AuthService {
   getCurrentUser(): Promise<{
     clerkUserId: string;
+    sessionId: string | null;
+    email: string | null;
+    name: string | null;
     isApproved: boolean;
     role: "student" | "unknown";
   } | null>;
@@ -45,11 +48,13 @@ export interface AgentService {
     actionIds: string[];
     approveDangerous: boolean;
     actorId: string;
+    studentId: string;
   }): Promise<{ snapshotId: string; applied: AgentAction[] }>;
 
   undo(input: {
     snapshotId: string;
     actorId: string;
+    studentId: string;
   }): Promise<{ success: true }>;
 }
 

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { clerkAuthService } from "@/lib/clerk/auth-service";
-import { filterAudit } from "@/lib/server/runtime-db";
-import { csvEscape, jsonError } from "@/lib/server/http";
+import { requireStudentAuth } from "@/lib/server/auth-guard";
+import { csvEscape } from "@/lib/server/http";
+import { listAuditEvents, upsertStudentFromAuth } from "@/lib/server/houra-repo";
 
 export async function GET(request: Request) {
-  const session = await clerkAuthService.getCurrentUser();
-  if (!session) return jsonError("Unauthorized", 401);
-  if (!session.isApproved || session.role !== "student") return jsonError("Forbidden", 403);
+  const guard = await requireStudentAuth();
+  if (!guard.ok) return guard.response;
 
   const { searchParams } = new URL(request.url);
 
@@ -15,7 +14,13 @@ export async function GET(request: Request) {
   const actionType = searchParams.get("actionType") ?? undefined;
   const format = searchParams.get("format") ?? "json";
 
-  const events = filterAudit({ actorType, entityType, actionType });
+  const student = await upsertStudentFromAuth(guard.auth);
+  const events = await listAuditEvents({
+    studentId: student.id,
+    actorType,
+    entityType,
+    actionType,
+  });
 
   if (format === "csv") {
     const headers = [

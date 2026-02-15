@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { clerkAuthService } from "@/lib/clerk/auth-service";
 import { agentService } from "@/lib/agent/agent-service";
+import { requireStudentAuth } from "@/lib/server/auth-guard";
+import { upsertStudentFromAuth } from "@/lib/server/houra-repo";
 import { jsonError } from "@/lib/server/http";
 
 const schema = z.object({
@@ -11,9 +12,8 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  const session = await clerkAuthService.getCurrentUser();
-  if (!session) return jsonError("Unauthorized", 401);
-  if (!session.isApproved || session.role !== "student") return jsonError("Forbidden", 403);
+  const guard = await requireStudentAuth();
+  if (!guard.ok) return guard.response;
 
   const payload = await request.json().catch(() => null);
   const parsed = schema.safeParse(payload);
@@ -22,12 +22,15 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid payload", 400);
   }
 
+  const student = await upsertStudentFromAuth(guard.auth);
+
   try {
     const result = await agentService.apply({
       runId: parsed.data.runId,
       actionIds: parsed.data.actionIds,
       approveDangerous: parsed.data.approveDangerous,
-      actorId: session.clerkUserId,
+      actorId: guard.auth.clerkUserId,
+      studentId: student.id,
     });
 
     return NextResponse.json(result);

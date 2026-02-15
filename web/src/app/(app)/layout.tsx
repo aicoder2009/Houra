@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
-import { clerkAuthService } from "@/lib/clerk/auth-service";
 import { AppShell } from "@/components/layout/app-shell";
+import { getAuthContext } from "@/lib/server/auth-guard";
+import { getBootstrap } from "@/lib/server/houra-repo";
 
 export default async function AuthedLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const user = await clerkAuthService.getCurrentUser();
+  const user = await getAuthContext();
 
   if (!user) {
     redirect("/sign-in");
@@ -17,5 +18,7 @@ export default async function AuthedLayout({
     redirect("/waitlist");
   }
 
-  return <AppShell>{children}</AppShell>;
+  const bootstrap = await getBootstrap(user);
+
+  return <AppShell initialState={bootstrap.state}>{children}</AppShell>;
 }

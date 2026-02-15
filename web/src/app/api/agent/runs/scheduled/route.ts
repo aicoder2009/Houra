@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { agentService } from "@/lib/agent/agent-service";
 import { readState } from "@/lib/server/runtime-db";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { jsonError } from "@/lib/server/http";
 
 const schema = z.object({
@@ -12,9 +13,11 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   const cronSecret = process.env.AGENT_CRON_SECRET;
-  const header = request.headers.get("x-houra-cron-secret") ?? request.headers.get("authorization");
+  const header =
+    request.headers.get("x-houra-cron-secret") ??
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
-  if (!cronSecret || !header || !header.includes(cronSecret)) {
+  if (!cronSecret || !header || header !== cronSecret) {
     return jsonError("Unauthorized cron invocation", 401);
   }
 
@@ -25,11 +28,29 @@ export async function POST(request: Request) {
     return jsonError(parsed.error.issues[0]?.message ?? "Invalid payload", 400);
   }
 
-  const state = readState();
-  if (!state.student) return jsonError("Student profile unavailable", 409);
+  let studentId = readState().student?.id;
+  const supabase = getSupabaseServerClient();
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("students")
+      .select("id")
+      .eq("role", "student")
+      .eq("is_approved", true)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      return jsonError(error.message, 500);
+    }
+    studentId = data?.id ?? studentId;
+  }
+
+  if (!studentId) return jsonError("Student profile unavailable", 409);
 
   const runResult = await agentService.run({
-    studentId: state.student.id,
+    studentId,
     objective:
       parsed.data.objective ??
       "Keep logs submission-ready, reduce sync debt, and enforce link hygiene autonomously.",
@@ -48,7 +69,8 @@ export async function POST(request: Request) {
       runId: runResult.run.id,
       actionIds: safeActionIds,
       approveDangerous: false,
-      actorId: state.student.id,
+      actorId: "system-cron",
+      studentId,
     });
     applied = applyResult.applied.length;
   }

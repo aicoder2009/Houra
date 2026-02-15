@@ -1,11 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Bell, Wrench, Bot, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SectionHeader } from "@/components/layout/section-header";
 import { useAppStore } from "@/lib/store/app-store";
+import type { AuthContext } from "@/lib/schemas/types";
 
 export default function SettingsPage() {
   const selectedModel = useAppStore((state) => state.selectedModel);
@@ -18,6 +20,31 @@ export default function SettingsPage() {
   const setAutonomousEnabled = useAppStore((state) => state.setAutonomousEnabled);
   const setAutoApplySafe = useAppStore((state) => state.setAutoApplySafe);
   const setApprovalForDangerous = useAppStore((state) => state.setApprovalForDangerous);
+  const [authContext, setAuthContext] = useState<AuthContext | null>(null);
+  const [openAiConfigured, setOpenAiConfigured] = useState<boolean | null>(null);
+  const [assistantConfigured, setAssistantConfigured] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (payload?.auth) {
+          setAuthContext(payload.auth as AuthContext);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/agent/config")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!payload) return;
+        setOpenAiConfigured(Boolean(payload.openAiConfigured));
+        setAssistantConfigured(Boolean(payload.assistantConfigured));
+      })
+      .catch(() => undefined);
+  }, []);
 
   return (
     <div>
@@ -91,6 +118,28 @@ export default function SettingsPage() {
             <div className="rounded-md border border-border/70 bg-surface/60 p-3">
               <p className="mb-1 font-medium">Environment</p>
               <p className="text-[11px] text-muted-foreground">Next.js 16 App Router · Clerk auth · Supabase adapter · Vercel cron-ready routes</p>
+            </div>
+            <div className="rounded-md border border-border/70 bg-surface/60 p-3">
+              <p className="mb-1 font-medium">Auth Diagnostics</p>
+              {authContext ? (
+                <p className="text-[11px] text-muted-foreground">
+                  role={authContext.role} · approved={String(authContext.isApproved)} · session=
+                  {authContext.sessionId ?? "none"}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">Loading auth context…</p>
+              )}
+            </div>
+            <div className="rounded-md border border-border/70 bg-surface/60 p-3">
+              <p className="mb-1 font-medium">Agent Provider</p>
+              {openAiConfigured === null ? (
+                <p className="text-[11px] text-muted-foreground">Checking OpenAI config…</p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  OpenAI API key: {openAiConfigured ? "configured" : "missing"} · Assistant ID:{" "}
+                  {assistantConfigured ? "set" : "not set"}
+                </p>
+              )}
             </div>
             <div className="rounded-md border border-border/70 bg-surface/60 p-3">
               <p className="mb-1 font-medium">Feature Rollout</p>
